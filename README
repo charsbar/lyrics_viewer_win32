@@ -1,0 +1,13 @@
+INSTRUCTION
+
+Launch iTunes, run the following from the command prompt, and visit http://localhost:3000/ with a web browser that supports WebSocket.
+
+  perl viewer daemon
+
+COPYRIGHT AND LICENSE
+
+Copyright (C) Kenichi Ishigaki
+
+This program is free software; you can redistribute it and/or
+modify it under the same terms as Perl itself.
+

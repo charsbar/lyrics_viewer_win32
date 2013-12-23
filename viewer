@@ -1,0 +1,84 @@
+use Mojolicious::Lite;
+use Mojo::IOLoop;
+use Mojo::JSON 'j';
+use Mojo::ByteStream 'b';
+use Mojo::Asset::File;
+use Win32::OLE;
+use File::Basename 'basename';
+use File::Path;
+
+our $VERSION = '0.01';
+
+my $itunes = Win32::OLE->new('iTunes.Application');
+
+my %clients;
+my $current;
+my $ping = 0;
+Mojo::IOLoop->recurring(1 => sub {
+  return unless %clients;
+  my $track = $itunes->CurrentTrack or return;
+
+  if (!$current or $current ne $track->Name) {
+    $current = $track->Name;
+    my $album = $track->Album;
+    my $basename = basename($track->Location);
+    $basename =~ s/\.m4a$/.txt/;
+    my $textfile = app->home->rel_file("text/$album/$basename");
+    unless (-f $textfile) {
+      my $dir = app->home->rel_dir("text/$album/");
+      mkpath $dir unless -d $dir;
+      open my $fh, '>', $textfile or app->log->debug("$textfile: $!");
+    }
+    my $text = Mojo::Asset::File->new(path => $textfile)->slurp;
+
+    my $json = b(j({
+      title => b($current)->decode('cp932'),
+      text => b($text)->decode('cp932'),
+    }))->decode;
+    $clients{$_}->send($json) for keys %clients;
+  }
+  if ($ping++ > 180) { # for keeping connections
+    $clients{$_}->send('{"ping": 1}') for keys %clients;
+    $ping = 0;
+  }
+});
+
+get '/' => 'index';
+
+websocket '/connect' => sub {
+  my $self = shift;
+  my $id = $self->tx;
+  $clients{$id} = $self->tx;
+  Mojo::IOLoop->stream($self->tx->connection)->timeout(600);
+  $current = ''; # to force reload
+  $self->on(finish => sub {
+    delete $clients{$id};
+  });
+};
+
+app->start;
+
+__DATA__
+
+@@ index.html.ep
+<html>
+<head>
+%= javascript '/mojo/jquery/jquery.js';
+%= javascript begin
+$(function(){
+  var ws = new WebSocket('<%= url_for('connect')->to_abs %>');
+  ws.onmessage = function(msg) {
+    var res = JSON.parse(msg.data);
+    console.log(res);
+    if (res.ping) return;
+    $('.title').text(res.title);
+    $('.text').text(res.text);
+  };
+});
+% end
+</head>
+<body>
+<h1 class="title"></h1>
+<pre class="text"></pre>
+</body>
+</html>
